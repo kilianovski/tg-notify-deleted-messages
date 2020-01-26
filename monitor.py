@@ -1,7 +1,6 @@
 import getpass
 import logging
 import os
-import pickle
 import signal
 import sqlite3
 import sys
@@ -12,12 +11,15 @@ from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
 
-from telethon import events, TelegramClient
+from telethon.sync import TelegramClient
+from telethon import events
+
 from telethon.errors import SessionPasswordNeededError
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.types import Message
 
 from bot_assistant import BotAssistant
+from message_serialization import SerializableMessage
 
 MINUTES_PER_HOUR = 60
 SECONDS_PER_MINUTE = 60
@@ -46,116 +48,115 @@ TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TARGET_CHAT = os.getenv("TARGET_CHAT")
 
-client = TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH)
-assert client.connect()
-
 # Auth
 if len(sys.argv) > 1 and sys.argv[1] == 'auth':
-    if client.is_user_authorized():
-        confirmation = input('Do you really want to delete current session and authorize new? [y/n]: ')
-        if confirmation.lower() != 'y':
-            exit(0)
+    with TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
+        if client.is_user_authorized():
+            confirmation = input('Do you really want to delete current session and authorize new? [y/n]: ')
+            if confirmation.lower() != 'y':
+                exit(0)
 
-    phone_number = input("Enter phone number: ")
-    client.send_code_request(phone_number)
+        phone_number = input("Enter phone number: ")
+        client.send_code_request(phone_number)
 
-    try:
-        client.sign_in(phone_number, input("Enter code: "))
-    except SessionPasswordNeededError:
-        client.sign_in(password=getpass.getpass())
+        try:
+            client.sign_in(phone_number, input("Enter code: "))
+        except SessionPasswordNeededError:
+            client.sign_in(password=getpass.getpass())
 
-    if client.is_user_authorized():
-        print('Something went wrong, please, retry')
+        if client.is_user_authorized():
+            print('Something went wrong, please, retry')
+            exit(1)
+
+        exit(0)
+
+with TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
+    # Daemon
+    if not client.is_user_authorized():
+        print('Please, execute `auth` command before starting the daemon (see README.md file)')
         exit(1)
 
-    exit(0)
 
-# Daemon
-if not client.is_user_authorized():
-    print('Please, execute `auth` command before starting the daemon (see README.md file)')
-    exit(1)
+    async def notify_message_deletion (text, files=None):
+        await client.send_message(
+            "me",
+            text
+        )
 
+    if TELEGRAM_BOT_TOKEN is not None:
+        if TARGET_CHAT is None:
+            print('Proivide TARGET_CHAT if you want to use bot assistant')
+            exit(1)
 
-def notify_message_deletion (text, files=None):
-    client.send_message(
-        "me",
-        text
-    )
+        print('Using bot for message notification')
+        bot = BotAssistant(TARGET_CHAT, TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN)
+        
+        notify_message_deletion = bot.notify_message_deletion
 
-if TELEGRAM_BOT_TOKEN is not None:
-    if TARGET_CHAT is None:
-        print('Proivide TARGET_CHAT if you want to use bot assistant')
-        exit(1)
+    # Database connection, table and indices creation
+    conn = sqlite3.connect("db/messages.db", check_same_thread=False)
+    c = conn.cursor()
 
-    print('Using bot for message notification')
-    bot = BotAssistant(TARGET_CHAT, TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN)
-    
-    notify_message_deletion = bot.notify_message_deletion
+    c.execute("""CREATE TABLE IF NOT EXISTS messages
+                (message_id INTEGER PRIMARY KEY, message BLOB, created DATETIME)""")
 
-# Database connection, table and indices creation
-conn = sqlite3.connect("db/messages.db", check_same_thread=False)
-c = conn.cursor()
+    c.execute("CREATE INDEX IF NOT EXISTS messages_created_index ON messages (created DESC)")
 
-c.execute("""CREATE TABLE IF NOT EXISTS messages
-             (message_id INTEGER PRIMARY KEY, message BLOB, created DATETIME)""")
-
-c.execute("CREATE INDEX IF NOT EXISTS messages_created_index ON messages (created DESC)")
-
-conn.commit()
-
-# Configure handlers
-client.updates.workers = 1
-
-
-@client.on(events.NewMessage(incoming=True))
-def handler(event: events.NewMessage.Event):
-    c.execute("INSERT INTO messages (message_id, message, created) VALUES (?, ?, ?)",
-              (event.message.id, sqlite3.Binary(pickle.dumps(event.message)), str(datetime.now())))
     conn.commit()
 
 
-@client.on(events.MessageDeleted())
-def handler(event: events.MessageDeleted.Event):
-    db_result = c.execute("SELECT message_id, message FROM messages WHERE message_id IN ({0})".format(
-        ",".join(str(e) for e in event.deleted_ids))).fetchall()
 
-    messages: List[Message] = [pickle.loads(i[1]) for i in db_result]
-
-    log_deleted_usernames = []
-
-    for message in messages:
-        user_request = client(GetFullUserRequest(message.from_id))
-        user = user_request.user
-
-        if user.first_name or user.last_name:
-            mention_username = \
-                (user.first_name + " " if user.first_name else "") + \
-                (user.last_name if user.last_name else "")
-        elif user.username:
-            mention_username = user.username
-        elif user.phone:
-            mention_username = user.phone
-        else:
-            mention_username = user.id
-
-        log_deleted_usernames.append(mention_username + "(" + str(user.id) + ")")
-
-        text = "** Deleted message from: **[{username}](tg://user?id={id})\n".format(
-            username=mention_username, id=user.id)
-
-        notify_message_deletion(text)
-
-        notify_message_deletion(message, message.media)
-
-    logging.info(
-        "Got {deleted_messages_count} deleted messages. Has in DB {db_messages_count}. Users: {users}".format(
-            deleted_messages_count=str(len(event.deleted_ids)),
-            db_messages_count=str(len(messages)),
-            users=", ".join(log_deleted_usernames))
-    )
+    @client.on(events.NewMessage())
+    async def handler(event: events.NewMessage.Event):
+        print('incomiing')
+        print(event.message)
+        c.execute("INSERT INTO messages (message_id, message, created) VALUES (?, ?, ?)",
+                (event.message.id, sqlite3.Binary(SerializableMessage.serialize(event.message)), str(datetime.now())))
+        conn.commit()
 
 
-client.start()
+    @client.on(events.MessageDeleted())
+    async def handler(event: events.MessageDeleted.Event):
+        db_result = c.execute("SELECT message_id, message FROM messages WHERE message_id IN ({0})".format(
+            ",".join(str(e) for e in event.deleted_ids))).fetchall()
+
+        messages = [SerializableMessage.deseriaze(i[1]) for i in db_result]
+
+        log_deleted_usernames = []
+
+        for message in messages:
+            user_request = await client(GetFullUserRequest(message.from_id))
+            user = user_request.user
+
+            if user.first_name or user.last_name:
+                mention_username = \
+                    (user.first_name + " " if user.first_name else "") + \
+                    (user.last_name if user.last_name else "")
+            elif user.username:
+                mention_username = user.username
+            elif user.phone:
+                mention_username = user.phone
+            else:
+                mention_username = user.id
+
+            log_deleted_usernames.append(mention_username + "(" + str(user.id) + ")")
+
+            text = "** Deleted message from: **[{username}](tg://user?id={id})\n".format(
+                username=mention_username, id=user.id)
+
+            await notify_message_deletion(text)
+
+            await notify_message_deletion(message.message)
+
+        logging.info(
+            "Got {deleted_messages_count} deleted messages. Has in DB {db_messages_count}. Users: {users}".format(
+                deleted_messages_count=str(len(event.deleted_ids)),
+                db_messages_count=str(len(messages)),
+                users=", ".join(log_deleted_usernames))
+        )
+
+
+    client.run_until_disconnected()
 
 
 class GracefulKiller:
