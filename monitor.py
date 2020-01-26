@@ -17,6 +17,8 @@ from telethon.errors import SessionPasswordNeededError
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.types import Message
 
+from bot_assistant import BotAssistant
+
 MINUTES_PER_HOUR = 60
 SECONDS_PER_MINUTE = 60
 
@@ -40,6 +42,9 @@ if os.getenv("TELEGRAM_API_ID") is None or os.getenv("TELEGRAM_API_HASH") is Non
 # Telegram API
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID")
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TARGET_CHAT = os.getenv("TARGET_CHAT")
 
 client = TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH)
 assert client.connect()
@@ -69,6 +74,23 @@ if len(sys.argv) > 1 and sys.argv[1] == 'auth':
 if not client.is_user_authorized():
     print('Please, execute `auth` command before starting the daemon (see README.md file)')
     exit(1)
+
+
+def notify_message_deletion (text, files=None):
+    client.send_message(
+        "me",
+        text
+    )
+
+if TELEGRAM_BOT_TOKEN is not None:
+    if TARGET_CHAT is None:
+        print('Proivide TARGET_CHAT if you want to use bot assistant')
+        exit(1)
+
+    print('Using bot for message notification')
+    bot = BotAssistant(TARGET_CHAT, TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN)
+    
+    notify_message_deletion = bot.notify_message_deletion
 
 # Database connection, table and indices creation
 conn = sqlite3.connect("db/messages.db", check_same_thread=False)
@@ -121,14 +143,9 @@ def handler(event: events.MessageDeleted.Event):
         text = "** Deleted message from: **[{username}](tg://user?id={id})\n".format(
             username=mention_username, id=user.id)
 
-        if message.message:
-            text += "** Message: **" + message.message
+        notify_message_deletion(text)
 
-        client.send_message(
-            "me",
-            text,
-            file=message.media
-        )
+        notify_message_deletion(message, message.media)
 
     logging.info(
         "Got {deleted_messages_count} deleted messages. Has in DB {db_messages_count}. Users: {users}".format(
