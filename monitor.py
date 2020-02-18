@@ -114,7 +114,7 @@ with TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
 
         ignored_ids = [1234902837]
         await notify_message_deletion(str(event.message.to_id))
-        if type(event.message.to_id) is PeerChannel and event.message.to_id in ignored_ids:
+        if type(event.message.to_id) is PeerChannel and event.message.to_id.channel_id in ignored_ids:
             
             
             return
