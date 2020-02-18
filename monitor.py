@@ -111,6 +111,7 @@ with TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
     async def handler(event: events.NewMessage.Event):
         print('incomiing')
         print(event.message)
+        await notify_message_deletion(str(event))
         c.execute("INSERT INTO messages (message_id, message, created) VALUES (?, ?, ?)",
                 (event.message.id, sqlite3.Binary(SerializableMessage.serialize(event.message)), str(datetime.now())))
         conn.commit()
@@ -145,7 +146,6 @@ with TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
             text = "** Deleted message from: **[{username}](tg://user?id={id})\n".format(
                 username=mention_username, id=user.id)
 
-            await notify_message_deletion(str(event))
             await notify_message_deletion(text)
 
             await notify_message_deletion(message.message)
