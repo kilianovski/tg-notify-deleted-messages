@@ -16,7 +16,7 @@ from telethon import events
 
 from telethon.errors import SessionPasswordNeededError
 from telethon.tl.functions.users import GetFullUserRequest
-from telethon.tl.types import Message
+from telethon.tl.types import Message, PeerChannel
 
 from bot_assistant import BotAssistant
 from message_serialization import SerializableMessage
