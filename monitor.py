@@ -52,7 +52,8 @@ TARGET_CHAT = os.getenv("TARGET_CHAT")
 if len(sys.argv) > 1 and sys.argv[1] == 'auth':
     with TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
         if client.is_user_authorized():
-            confirmation = input('Do you really want to delete current session and authorize new? [y/n]: ')
+            #confirmation = input('Do you really want to delete current session and authorize new? [y/n]: ')
+            confirmation = 'n'
             if confirmation.lower() != 'y':
                 exit(0)
 
