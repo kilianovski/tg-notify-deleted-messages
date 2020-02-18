@@ -141,7 +141,7 @@ with TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
 
             log_deleted_usernames.append(mention_username + "(" + str(user.id) + ")")
 
-            text = "** Deleted message from: **[{username}](tg://user?id={id})\n".format(
+            text = "** Deleted! message from: **[{username}](tg://user?id={id})\n".format(
                 username=mention_username, id=user.id)
 
             await notify_message_deletion(text)
