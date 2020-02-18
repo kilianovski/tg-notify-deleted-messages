@@ -112,7 +112,7 @@ with TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
         print('incomiing')
         print(event.message)
 
-        if event.message.to_id is PeerChannel:
+        if type(event.message.to_id) is PeerChannel:
             
             await notify_message_deletion('msg in our group')
             return
