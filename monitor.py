@@ -112,9 +112,10 @@ with TelegramClient("db/user", TELEGRAM_API_ID, TELEGRAM_API_HASH) as client:
         print('incomiing')
         print(event.message)
 
-        if type(event.message.to_id) is PeerChannel:
+        ignored_ids = [1234902837]
+        if type(event.message.to_id) is PeerChannel and event.message.to_id in ignored_ids:
             
-            await notify_message_deletion('msg in our group')
+            
             return
 
         c.execute("INSERT INTO messages (message_id, message, created) VALUES (?, ?, ?)",
