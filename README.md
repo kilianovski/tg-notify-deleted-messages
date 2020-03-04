@@ -39,4 +39,4 @@ Be careful, your messages can fill your disk space.
 ## Security
 
 Please, don't run this application on servers, where other persons have access to. Messages history and credentials stores in an
-insecure SQLite database.
+insecure SQLite database!
